@@ -13,11 +13,14 @@ builder.Services.AddHostedService<AppointmentReminderService>();
 
 var app = builder.Build();
 
+app.UseSwagger();      // Enables middleware to serve Swagger JSON
+app.UseSwaggerUI();    // Enables middleware to serve Swagger UI
+
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
-    app.UseSwagger();      // Enables middleware to serve Swagger JSON
-    app.UseSwaggerUI();    // Enables middleware to serve Swagger UI
+    //Moved swagger app outside for demo purposes
+    //Leaving if(){} for future development tools
 }
 
 app.UseHttpsRedirection();
