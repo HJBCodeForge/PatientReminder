@@ -1,91 +1,162 @@
 # PatientReminder API
 
-## Overview
+A lightweight ASP.NET Core Web API for scheduling patient appointments and sending automated reminders. It uses SQLite for persistence (single file DB), runs well in Docker, and can be deployed to AWS Elastic Beanstalk.
 
-**PatientReminder API** is a simple ASP.NET Core Web API designed to help manage patient appointments and send automated reminders. It uses a lightweight SQLite database, making it ideal for portfolio projects, demos, or small-scale deployments without the need for a separate database server.
+Live (AWS Elastic Beanstalk)
+- Base URL: http://PatientReminderApi.us-east-2.elasticbeanstalk.com
+- Note: Swagger UI is enabled by default only in Development. See the Swagger section below if you want it enabled in cloud environments.
 
 ## Features
+- Appointment scheduling via REST endpoint
+- Background reminder service (`AppointmentReminderService`) checks upcoming appointments and logs reminder attempts
+- SQLite database (`appointments.db`) — no server installation required
+- Dockerized for easy local runs and deployments
 
-- **Appointment Scheduling:**  
-  Create and store patient appointments via RESTful endpoints.
+## Tech Stack
+- .NET8 (ASP.NET Core Web API)
+- Entity Framework Core8 (SQLite)
+- Swagger/OpenAPI (via `Swashbuckle.AspNetCore`)
+- Docker
+- AWS Elastic Beanstalk (single-container Docker)
 
-- **Automated Reminders:**  
-  A background service (`AppointmentReminderService`) checks for upcoming appointments and sends reminders.
+## Project Structure (key parts)
+- `PatientReminder.API/Program.cs` — app bootstrap, DI, middleware, DB init
+- `PatientReminder.API/Controllers/` — API endpoints (for example `AppointmentsController`)
+- `PatientReminder.API/appsettings.json` — configuration (connection strings, logging)
+- `PatientReminder.API/Dockerfile` — container image build
+- `Dockerrun.aws.json` — EB single-container deployment definition
 
-- **Interactive API Documentation:**  
-  Integrated Swagger UI for exploring and testing API endpoints directly from your browser.
+## Getting Started (Local)
 
-- **SQLite Database:**  
-  All data is stored in a single file (`appointments.db`), requiring no additional setup.
+Prerequisites
+- .NET8 SDK
+- Optional: Docker Desktop (to run in containers)
 
-## Getting Started
+Clone and run
+1) Clone
+```
+git clone https://github.com/HJBCodeForge/PatientReminder.git
+cd PatientReminder/PatientReminder.API
+```
+2) Restore
+```
+dotnet restore
+```
+3) Initialize database
+- Option A (migrations, recommended if you have migrations added):
+```
+dotnet ef database update
+```
+- Option B (no migrations): the app will create the schema automatically at startup (via `Migrate()` when migrations exist, otherwise `EnsureCreated()`).
 
-### Prerequisites
+4) Run
+```
+dotnet run
+```
+5) Open the app
+- Check the console for the listening URLs (e.g., `http://localhost:5xxx`).
+- Example test endpoint: `GET /weatherforecast`.
 
-- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
-- [Docker](https://www.docker.com/) (optional, for containerized deployment)
+Swagger UI (local)
+- Swagger is configured and enabled by default in Development.
+- When running locally, navigate to `/swagger` (e.g., `http://localhost:5xxx/swagger`).
 
-### Running Locally
+## Running with Docker
 
-1. **Clone the repository:**
-1. git clone https://github.com/HJBCodeForge/PatientReminder.git cd PatientReminder/PatientReminder.API
+Build image (from repo root)
+```
+docker build -t patient-reminder-api -f PatientReminder.API/Dockerfile PatientReminder.API
+```
+Run container
+```
+docker run -p8080:8080 patient-reminder-api
+```
+Open
+- API: http://localhost:8080
+- Example: http://localhost:8080/weatherforecast
+- Swagger UI (if enabled in production): http://localhost:8080/swagger
 
-2. **Restore dependencies:**
-1. dotnet restore
+Notes
+- The container listens on port8080.
+- HTTPS redirect is disabled when running in a container to avoid “Failed to determine the https port” warnings.
 
-3. **Apply database migrations:**
-1. dotnet ef database update
+## API Usage
 
+Schedule an appointment
+- Route: `POST /Appointments`
+- Body (JSON):
+```
+{
+ "patientPhoneNumber": "+15555551234",
+ "appointmentTime": "2025-01-01T14:30:00Z"
+}
+```
+- cURL example:
+```
+curl -X POST http://localhost:8080/Appointments \
+ -H "Content-Type: application/json" \
+ -d '{
+ "patientPhoneNumber": "+15555551234",
+ "appointmentTime": "2025-01-01T14:30:00Z"
+ }'
+```
+- Response: `201 Created` with the created resource.
 
-4. **Run the application:**
-1. dotnet run
+Health/sample endpoint
+- `GET /weatherforecast`
 
+### Entities (simplified)
+- `Appointment` — `Id`, `PatientPhoneNumber`, `AppointmentTime`, `IsReminderSent`
 
-5. **Access Swagger UI:**
-   Open [http://localhost:5000/swagger](http://localhost:5000/swagger) (or the port shown in your terminal) to view and interact with the API documentation.
+### Background reminders
+- `AppointmentReminderService` runs periodically, finds pending appointments within a time window, and logs reminder attempts. You can integrate SMS/Email providers in this service.
 
-### Running with Docker
+## Configuration
 
-1. **Build the Docker image:**
-1. docker build -t patient-reminder-api -f PatientReminder.API/Dockerfile PatientReminder.API
+Connection string
+- Default is in `PatientReminder.API/appsettings.json`:
+```
+"ConnectionStrings": {
+ "DefaultConnection": "Data Source=appointments.db"
+}
+```
+- Override with environment variable:
+ - Windows/PowerShell: `$env:ConnectionStrings__DefaultConnection="Data Source=appointments.db"`
+ - Docker/EB: set `ConnectionStrings__DefaultConnection` in environment config if you need a different path.
 
-2. **Run the container:**
-1. docker run -p 8080:8080 patient-reminder-api
+Ports
+- The app listens on `8080` in containers. Update `Dockerrun.aws.json` or `-p` mapping accordingly.
 
+## Deployment (AWS Elastic Beanstalk)
 
-3. **Access Swagger UI:**
-   Open [http://localhost:8080/swagger](http://localhost:8080/swagger)
+- Image: `henninghjbcodeforge/patient-reminder:v1.1.3`
+- `Dockerrun.aws.json` (v1) maps container port `8080`.
+- Public URL: http://PatientReminderApi.us-east-2.elasticbeanstalk.com
 
-## API Endpoints
+Tips
+- Swagger UI is disabled by default in Production. To enable it in EB for demo purposes, move `app.UseSwagger()` and `app.UseSwaggerUI()` outside the development check in `Program.cs`, or set `ASPNETCORE_ENVIRONMENT=Development` in EB (for demo only).
+- Consider setting a health check URL in EB (e.g., `/weatherforecast`).
 
-- **POST /appointments**  
-  Schedule a new appointment.
+## Troubleshooting
 
-- **GET /weatherforecast**  
-  Example endpoint for testing (default template).
+- Connection refused on localhost
+ - Ensure you run with port mapping: `docker run -p8080:8080 patient-reminder-api`
+ - Verify published ports with `docker ps`.
 
-- **Swagger UI**  
-  Explore all available endpoints and models.
+- “Failed to determine the https port for redirect”
+ - This is avoided in container runs by skipping HTTPS redirection when `DOTNET_RUNNING_IN_CONTAINER=true`.
 
-## How It Works
+- “no such table: Appointments”
+ - Ensure the DB schema is applied. At startup the app runs `Migrate()` if migrations exist, else `EnsureCreated()`. If switching from `EnsureCreated()` to migrations, delete the existing SQLite file to avoid conflicts.
 
-- **Appointment Scheduling:**  
-  Send a POST request with appointment details to `/appointments`. The API stores the appointment and marks it as pending for reminders.
+## Roadmap / Ideas
+- Add real SMS/email integration for reminders
+- Add authentication/authorization
+- Add validation and richer appointment workflow
+- CI/CD pipeline for automated builds and deployments
 
-- **Automated Reminders:**  
-  The `AppointmentReminderService` runs in the background, periodically checking for appointments that need reminders and sending them (implementation details in `Services/AppointmentReminderService.cs`).
-
-## Technologies Used
-
-- ASP.NET Core 8 Web API
-- Entity Framework Core (with SQLite)
-- Swagger (via Swashbuckle.AspNetCore)
-- Docker (optional)
+## Contributing
+Issues and PRs are welcome. Please open an issue to discuss major changes.
 
 ## License
-
-This project is for educational and portfolio purposes.
-
----
-
-**For questions or contributions, please open an issue or submit a pull request.**
+This project is provided for educational and portfolio purposes.

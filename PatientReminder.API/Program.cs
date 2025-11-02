@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
+builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer(); // Enables endpoint discovery for Swagger
 builder.Services.AddSwaggerGen();           // Registers Swagger generator
 
@@ -10,20 +11,43 @@ builder.Services.AddDbContext<ApiDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 builder.Services.AddHostedService<AppointmentReminderService>();
+//builder.WebHost.UseUrls("http://*:8080");
 
 var app = builder.Build();
 
-app.UseSwagger();      // Enables middleware to serve Swagger JSON
-app.UseSwaggerUI();    // Enables middleware to serve Swagger UI
-
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
+// Apply DB schema before the app starts (so hosted services don't fail)
+using (var scope = app.Services.CreateScope())
 {
-    //Moved swagger app outside for demo purposes
-    //Leaving if(){} for future development tools
+    var db = scope.ServiceProvider.GetRequiredService<ApiDbContext>();
+
+    // If you have migrations, this will apply them.
+    // If you don't, fall back to creating the schema from the model.
+    if (db.Database.GetMigrations().Any())
+    {
+        db.Database.Migrate();
+    }
+    else
+    {
+        db.Database.EnsureCreated();
+    }
 }
 
-app.UseHttpsRedirection();
+app.UseSwagger();
+app.UseSwaggerUI();
+// Swagger (enable in Development; move outside if you want it in Docker/Production)
+if (app.Environment.IsDevelopment())
+{
+
+}
+
+// Only redirect to HTTPS when not running in a container
+var isInContainer = Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") == "true";
+if (!isInContainer)
+{
+    app.UseHttpsRedirection();
+}
+
+app.MapControllers();
 
 var summaries = new[]
 {
