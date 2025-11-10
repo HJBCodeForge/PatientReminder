@@ -1,162 +1,267 @@
-# PatientReminder API
+<div align="center">
 
-A lightweight ASP.NET Core Web API for scheduling patient appointments and sending automated reminders. It uses SQLite for persistence (single file DB), runs well in Docker, and can be deployed to AWS Elastic Beanstalk.
+# Patient Reminder API
 
-Live (AWS Elastic Beanstalk)
-- Base URL: http://PatientReminderApi.us-east-2.elasticbeanstalk.com
-- Note: Swagger UI is enabled by default only in Development. See the Swagger section below if you want it enabled in cloud environments.
+Lightweight .NET 8 REST API + background worker that stores patient appointments and simulates sending SMS reminders 24 hours before each appointment. Deployed as a single Docker container to AWS Elastic Beanstalk.
 
-## Features
-- Appointment scheduling via REST endpoint
-- Background reminder service (`AppointmentReminderService`) checks upcoming appointments and logs reminder attempts
-- SQLite database (`appointments.db`) ó no server installation required
-- Dockerized for easy local runs and deployments
+![.NET](https://img.shields.io/badge/.NET-8.0-512BD4?logo=dotnet&logoColor=white) ![EF Core](https://img.shields.io/badge/EF%20Core-Sqlite-6D3B87) ![Swagger](https://img.shields.io/badge/OpenAPI-Swagger-85EA2D?logo=swagger&logoColor=white) ![Docker](https://img.shields.io/badge/Container-Docker-2496ED?logo=docker&logoColor=white) ![AWS](https://img.shields.io/badge/Deploy-AWS%20Elastic%20Beanstalk-FF9900?logo=amazonaws&logoColor=white)
 
-## Tech Stack
-- .NET8 (ASP.NET Core Web API)
-- Entity Framework Core8 (SQLite)
-- Swagger/OpenAPI (via `Swashbuckle.AspNetCore`)
-- Docker
-- AWS Elastic Beanstalk (single-container Docker)
+</div>
 
-## Project Structure (key parts)
-- `PatientReminder.API/Program.cs` ó app bootstrap, DI, middleware, DB init
-- `PatientReminder.API/Controllers/` ó API endpoints (for example `AppointmentsController`)
-- `PatientReminder.API/appsettings.json` ó configuration (connection strings, logging)
-- `PatientReminder.API/Dockerfile` ó container image build
-- `Dockerrun.aws.json` ó EB single-container deployment definition
+## üåê Live API
 
-## Getting Started (Local)
+Base URL: `http://PatientReminderApi.us-east-2.elasticbeanstalk.com`
 
-Prerequisites
-- .NET8 SDK
-- Optional: Docker Desktop (to run in containers)
+Swagger UI (interactive docs): `http://PatientReminderApi.us-east-2.elasticbeanstalk.com/swagger`
 
-Clone and run
-1) Clone
+> NOTE: Elastic Beanstalk maps container port `8080` -> `80` externally, so you do not need to specify the port in the public URL.
+
+## ‚ú® Features
+
+- Schedule appointments via a simple POST endpoint.
+- Background hosted service (`AppointmentReminderService`) runs every minute:
+	- Finds appointments within the next 24 hours where a reminder was not yet sent.
+	- Logs a simulated reminder and flags the record (`IsReminderSent = true`).
+- EF Core + SQLite file database (`appointments.db`).
+- Automatic database migration / creation on startup.
+- OpenAPI (Swagger) for quick testing.
+- Containerized (multi-stage Dockerfile) and deployable to AWS Elastic Beanstalk via `Dockerrun.aws.json` or a published image.
+
+## üß± Architecture Overview
+
 ```
-git clone https://github.com/HJBCodeForge/PatientReminder.git
-cd PatientReminder/PatientReminder.API
+Client --> HTTP (REST)
+						|
+				ASP.NET Core (Controllers)
+						|
+		EF Core DbContext (SQLite file)
+						|
+ Background Hosted Service (Timer every 1 min)
+						|
+	 Queries pending reminders, logs simulated SMS
 ```
-2) Restore
+
+Core components:
+
+| Component | File | Responsibility |
+|-----------|------|----------------|
+| API Host | `Program.cs` | Service registration, DB migration/creation, endpoint mapping |
+| Data Model | `Appointment.cs` | Domain entity persisted in SQLite |
+| Persistence | `ApiDbContext.cs` | EF Core DbContext & DbSet | 
+| REST Endpoint | `Controllers/AppointmentsController.cs` | Accepts appointment creation requests |
+| Background Worker | `Services/AppointmentReminderService.cs` | Periodic reminder scan & logging |
+| Container Build | `PatientReminder.API/Dockerfile` | Multi‚Äëstage build/publish |
+| AWS Deployment | `Dockerrun.aws.json` | Single container Elastic Beanstalk definition |
+
+## üì¶ Tech Stack
+
+- .NET 8 (ASP.NET Core Minimal Hosting Model)
+- Entity Framework Core (SQLite provider)
+- Hosted Background Service (`IHostedService`)
+- Swashbuckle / OpenAPI
+- Docker (multi-stage build)
+- AWS Elastic Beanstalk (Single Container Platform)
+
+## üîå Endpoints
+
+| Method | Route | Description | Auth |
+|--------|-------|-------------|------|
+| POST | `/appointments` | Create / schedule an appointment | None |
+| GET | `/weatherforecast` | Sample scaffold endpoint (demo only) | None |
+| GET | `/swagger` | OpenAPI UI | None |
+
+### POST /appointments
+
+Request body (JSON):
+
+```json
+{
+	"patientPhoneNumber": "+15551234567",
+	"appointmentTime": "2025-11-15T14:30:00Z"
+}
 ```
+
+Response `201 Created`:
+```json
+{
+	"id": 1,
+	"patientPhoneNumber": "+15551234567",
+	"appointmentTime": "2025-11-15T14:30:00Z",
+	"isReminderSent": false
+}
+```
+
+Validation / Notes:
+- Times should be provided in UTC (`Z`).
+- `isReminderSent` is server-managed.
+- Currently there is no GET/list endpoint for appointments (see Roadmap).
+
+## üïí Reminder Logic
+
+Every minute the hosted service:
+1. Creates a new DI scope.
+2. Queries appointments where:
+	 - `IsReminderSent == false`
+	 - `AppointmentTime` within next 24 hours AND in the future.
+3. Logs a simulated reminder per match.
+4. Sets `IsReminderSent = true` then saves changes.
+
+This design avoids holding a long-lived DbContext and is safe for future scoped services (e.g., SMS gateway abstraction).
+
+## üöÄ Quick Start (Local Development)
+
+### Prerequisites
+- .NET 8 SDK
+- (Optional) Docker Desktop
+
+### Run Without Docker
+
+```powershell
+cd PatientReminder.API
 dotnet restore
+dotnet ef database update  # applies existing migrations if any
+dotnet run --project PatientReminder.API.csproj
 ```
-3) Initialize database
-- Option A (migrations, recommended if you have migrations added):
+
+Open: `http://localhost:5020/swagger`
+
+### Run With Docker
+
+```powershell
+cd PatientReminder.API
+docker build -t patient-reminder:local .
+docker run --rm -p 8080:8080 -e ASPNETCORE_ENVIRONMENT=Development patient-reminder:local
 ```
+
+Open: `http://localhost:8080/swagger`
+
+> Data persistence: the SQLite file lives inside the container. To persist between runs, mount a volume:
+```powershell
+docker run --rm -p 8080:8080 -v ${PWD}/data:/app patient-reminder:local
+```
+
+## üóÑÔ∏è Database & Migrations
+
+SQLite file: `appointments.db` (created at startup if absent).
+
+Add a new migration (example):
+```powershell
+dotnet ef migrations add AddNotesField --project PatientReminder.API
 dotnet ef database update
 ```
-- Option B (no migrations): the app will create the schema automatically at startup (via `Migrate()` when migrations exist, otherwise `EnsureCreated()`).
 
-4) Run
+If using Docker, either:
+- Run migrations in a build/publish phase, or
+- Add an entrypoint script that calls `dotnet ef database update` (future enhancement).
+
+## üß™ Testing & Verification
+
+### 1. Swagger UI
+Use the form under POST /appointments to create an appointment whose time is ~23 hours in the future. Observe logs printing a simulated reminder within the next minute.
+
+### 2. PowerShell (Invoke-RestMethod)
+```powershell
+$base = "http://localhost:8080"  # or live base URL
+Invoke-RestMethod -Method Post -Uri "$base/appointments" -Body (@{ patientPhoneNumber = "+15551230000"; appointmentTime = (Get-Date).ToUniversalTime().AddHours(23).ToString("o") } | ConvertTo-Json) -ContentType 'application/json'
 ```
-dotnet run
+Check application console logs for: `SIMULATING REMINDER`.
+
+### 3. cURL
+```bash
+curl -X POST $base/appointments \
+	-H "Content-Type: application/json" \
+	-d '{"patientPhoneNumber":"+15551230000","appointmentTime":"2025-11-15T14:00:00Z"}'
 ```
-5) Open the app
-- Check the console for the listening URLs (e.g., `http://localhost:5xxx`).
-- Example test endpoint: `GET /weatherforecast`.
 
-Swagger UI (local)
-- Swagger is configured and enabled by default in Development.
-- When running locally, navigate to `/swagger` (e.g., `http://localhost:5xxx/swagger`).
+### 4. Log Assertions (Future)
+Consider adding xUnit tests with an in-memory database and a fake logger to assert reminder transitions.
 
-## Running with Docker
+## üê≥ AWS Elastic Beanstalk Deployment
 
-Build image (from repo root)
+Deployment uses `Dockerrun.aws.json` (v1) referencing a public image: `henninghjbcodeforge/patient-reminder:v1.1.3`.
+
+### Update Flow
+1. Increment image tag (e.g., `v1.1.4`).
+2. Build & push:
+	 ```powershell
+	 docker build -t henninghjbcodeforge/patient-reminder:v1.1.4 PatientReminder.API
+	 docker push henninghjbcodeforge/patient-reminder:v1.1.4
+	 ```
+3. Edit `Dockerrun.aws.json` tag.
+4. Upload updated `Dockerrun.aws.json` through EB console or via CLI (`eb deploy`).
+
+### Health / Logs
+- EB will surface container stdout/stderr. Ensure reminder logs appear.
+- Scale considerations: running multiple instances could send duplicate reminders. (See Roadmap for mitigation strategies.)
+
+## üîê Environment Variables
+
+Current configuration is minimal:
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `ASPNETCORE_ENVIRONMENT` | Environment mode | Development (local) |
+| `ConnectionStrings__DefaultConnection` | Override SQLite path / connection | `Data Source=appointments.db` |
+
+Example override (PowerShell):
+```powershell
+$env:ConnectionStrings__DefaultConnection = "Data Source=data/appointments.db"; dotnet run
 ```
-docker build -t patient-reminder-api -f PatientReminder.API/Dockerfile PatientReminder.API
-```
-Run container
-```
-docker run -p8080:8080 patient-reminder-api
-```
-Open
-- API: http://localhost:8080
-- Example: http://localhost:8080/weatherforecast
-- Swagger UI (if enabled in production): http://localhost:8080/swagger
 
-Notes
-- The container listens on port8080.
-- HTTPS redirect is disabled when running in a container to avoid ìFailed to determine the https portî warnings.
+## üß≠ Roadmap
 
-## API Usage
+- [ ] Add GET /appointments (list & filter upcoming)
+- [ ] Add GET /appointments/{id}
+- [ ] Add soft deletion / cancellation
+- [ ] External SMS gateway integration (Twilio / SNS)
+- [ ] Idempotency & duplicate reminder prevention in multi-instance scaling
+- [ ] Replace polling with scheduled queue (e.g., Hangfire, Quartz, or AWS EventBridge) for efficiency
+- [ ] Health check endpoint (`/healthz`) & EB enhanced health integration
+- [ ] Structured logging + OpenTelemetry tracing
+- [ ] Container multi-stage build optimization (trim, distroless)
 
-Schedule an appointment
-- Route: `POST /Appointments`
-- Body (JSON):
-```
-{
- "patientPhoneNumber": "+15555551234",
- "appointmentTime": "2025-01-01T14:30:00Z"
-}
-```
-- cURL example:
-```
-curl -X POST http://localhost:8080/Appointments \
- -H "Content-Type: application/json" \
- -d '{
- "patientPhoneNumber": "+15555551234",
- "appointmentTime": "2025-01-01T14:30:00Z"
- }'
-```
-- Response: `201 Created` with the created resource.
+## üõ°Ô∏è Scaling & Concurrency Notes
 
-Health/sample endpoint
-- `GET /weatherforecast`
+- Current approach is safe for single instance.
+- Multiple instances could race and send multiple reminders. Mitigations:
+	- Row-level locking and status update inside a transaction.
+	- Add a `ReminderSentAt` timestamp column.
+	- Centralized task queue.
 
-### Entities (simplified)
-- `Appointment` ó `Id`, `PatientPhoneNumber`, `AppointmentTime`, `IsReminderSent`
+## üßπ Code Quality Suggestions (Future Enhancements)
 
-### Background reminders
-- `AppointmentReminderService` runs periodically, finds pending appointments within a time window, and logs reminder attempts. You can integrate SMS/Email providers in this service.
+- Introduce a repository layer or CQRS if complexity grows.
+- DTOs & FluentValidation for request validation.
+- Replace `Timer` with `PeriodicTimer` (async friendly) in .NET 8.
+- Integration tests using `WebApplicationFactory` + `Testcontainers` for greater fidelity.
 
-## Configuration
+## ‚ùì Troubleshooting
 
-Connection string
-- Default is in `PatientReminder.API/appsettings.json`:
-```
-"ConnectionStrings": {
- "DefaultConnection": "Data Source=appointments.db"
-}
-```
-- Override with environment variable:
- - Windows/PowerShell: `$env:ConnectionStrings__DefaultConnection="Data Source=appointments.db"`
- - Docker/EB: set `ConnectionStrings__DefaultConnection` in environment config if you need a different path.
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| No reminders logged | Appointment time not within 24h window | Use time within next 24h but >= now |
+| 500 errors on startup in Docker | DB migration race / file permissions | Ensure container user has write permission; consider `EnsureCreated` fallback (already implemented) |
+| Data lost between container runs | Ephemeral container FS | Mount a host volume for `/app` or only the DB file |
+| Swagger not accessible publicly | Network / EB environment not healthy | Check EB logs & security group rules |
 
-Ports
-- The app listens on `8080` in containers. Update `Dockerrun.aws.json` or `-p` mapping accordingly.
+## ü§ù Contributing
 
-## Deployment (AWS Elastic Beanstalk)
+1. Fork repo
+2. Create feature branch: `git checkout -b feature/xyz`
+3. Commit changes: `git commit -m "Add xyz"`
+4. Push branch & open PR
 
-- Image: `henninghjbcodeforge/patient-reminder:v1.1.3`
-- `Dockerrun.aws.json` (v1) maps container port `8080`.
-- Public URL: http://PatientReminderApi.us-east-2.elasticbeanstalk.com
+Please include tests for logic-heavy changes.
 
-Tips
-- Swagger UI is disabled by default in Production. To enable it in EB for demo purposes, move `app.UseSwagger()` and `app.UseSwaggerUI()` outside the development check in `Program.cs`, or set `ASPNETCORE_ENVIRONMENT=Development` in EB (for demo only).
-- Consider setting a health check URL in EB (e.g., `/weatherforecast`).
+## üìÑ License
 
-## Troubleshooting
+No license file currently provided. Consider adding `LICENSE` (MIT, Apache 2.0, etc.) to clarify usage rights.
 
-- Connection refused on localhost
- - Ensure you run with port mapping: `docker run -p8080:8080 patient-reminder-api`
- - Verify published ports with `docker ps`.
+## üôå Acknowledgements
 
-- ìFailed to determine the https port for redirectî
- - This is avoided in container runs by skipping HTTPS redirection when `DOTNET_RUNNING_IN_CONTAINER=true`.
+Built with the .NET 8 minimal hosting model and common production patterns (dependency injection, hosted services, EF Core migrations).
 
-- ìno such table: Appointmentsî
- - Ensure the DB schema is applied. At startup the app runs `Migrate()` if migrations exist, else `EnsureCreated()`. If switching from `EnsureCreated()` to migrations, delete the existing SQLite file to avoid conflicts.
+---
 
-## Roadmap / Ideas
-- Add real SMS/email integration for reminders
-- Add authentication/authorization
-- Add validation and richer appointment workflow
-- CI/CD pipeline for automated builds and deployments
+Feel free to open issues for questions or enhancement ideas. Happy building!
 
-## Contributing
-Issues and PRs are welcome. Please open an issue to discuss major changes.
-
-## License
-This project is provided for educational and portfolio purposes.
