@@ -1,39 +1,56 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 
-// These attributes configure the class as an API controller.
+// -----------------------------------------------------------------------------
+// AppointmentsController
+// -----------------------------------------------------------------------------
+// Purpose: Exposes endpoints to manage appointments.
+// Currently implemented: POST /appointments to create a new appointment.
+// Future extensions: GET (list), GET by id, DELETE/cancel, PATCH (reschedule).
+//
+// Design notes:
+// - Uses constructor injection for ApiDbContext (scoped lifetime) provided by DI.
+// - Returns 201 Created with resource representation for REST compliance.
+// - Validation is minimal; extend with FluentValidation / data annotations as needed.
+// -----------------------------------------------------------------------------
 [ApiController]
-[Route("[controller]")]
-
+[Route("[controller]")] // Resolves to /appointments due to controller name
 public class AppointmentsController : ControllerBase
 {
-        private readonly ApiDbContext _context;
-        // The constructor accepts an ApiDbContext instance.
-        // This is an example of DEPENDENCY INJECTION, a key concept Phreesia asks about.[1]
-        // The.NET runtime provides this instance automatically because you registered it in Program.cs.
-        public AppointmentsController(ApiDbContext context)
+    private readonly ApiDbContext _context;
+
+    public AppointmentsController(ApiDbContext context)
     {
         _context = context;
     }
 
-    // This attribute marks this method to handle HTTP POST requests.
+    /// <summary>
+    /// Schedules a new appointment.
+    /// </summary>
+    /// <param name="appointment">Incoming appointment payload (JSON).</param>
+    /// <returns>HTTP 201 with created appointment or 400 on validation failure.</returns>
+    /// <remarks>
+    /// Example request:
+    /// {
+    ///   "patientPhoneNumber": "+15551234567",
+    ///   "appointmentTime": "2025-11-15T14:30:00Z"
+    /// }
+    /// </remarks>
     [HttpPost]
     public async Task<IActionResult> ScheduleAppointment(Appointment appointment)
     {
-        // Basic validation to ensure the request body was not empty.
+        // Guard: model binder produced null (e.g., empty body)
         if (appointment == null)
         {
             return BadRequest("Appointment data is required.");
         }
 
-        // Set default values before saving to the database.
+        // Defensive initialization (hosted reminder service expects false until sent)
         appointment.IsReminderSent = false;
 
-        // Add the new appointment to the DbContext and save changes asynchronously.
         _context.Appointments.Add(appointment);
         await _context.SaveChangesAsync();
 
-        // Return a 201 Created response. This is a RESTful best practice.
-        // It tells the client the request was successful and where the new resource is located.
+        // Returns location header (self since no GET by id yet). Consider adding GET route for richer REST navigation.
         return CreatedAtAction(nameof(ScheduleAppointment), new { id = appointment.Id }, appointment);
     }
 }
